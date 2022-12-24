@@ -25,6 +25,7 @@ ym_release         := $C012
 ym_init            := $C015
 psg_init           := $C018
 notecon_midi2fm    := $C033
+notecon_freq2psg   := $C03C
 notecon_midi2psg   := $C03F
 
 main:
@@ -48,7 +49,33 @@ main:
     lda #$0a
     sta X16::Reg::ROMBank
 
+    ; test frequency conversion routines
+    ldx #<440
+    ldy #>440
+    jsr notecon_freq2psg
+    cpx #<1181
+    bne freqerror
+    cpy #>1181
+    bne freqerror
 
+    ldx #<24411
+    ldy #>24411
+    jsr notecon_freq2psg
+    cpx #<65533
+    bne freqerror
+    cpy #>65533
+    bne freqerror
+    bra soundtest
+freqerror:
+    phx
+    tya
+    jsr print_hex
+    pla
+    jsr print_hex
+
+    jmp end
+
+soundtest:
     jsr ym_init
     jsr psg_init
     lda #0
@@ -84,7 +111,7 @@ loop:
     bcs error
 
     ; wait for some interrupts
-    ldx #8
+    ldx #4
 l1:
     wai
     dex
@@ -109,15 +136,10 @@ l1:
 
     VERA_SET_ADDR (Vera::VRAM_psg + 2), 0 ; volume register
     ; wait for some interrupts
-    ldx #16
+    ldx #4
 l2:
     wai
     dex
-    txa
-    asl
-    asl
-    ora #$C0
-    sta Vera::Reg::Data0
     cpx #0
     bne l2
 
@@ -138,6 +160,7 @@ l3:
 
     jmp loop
 error:
+end:
     pla
     sta X16::Reg::ROMBank
     rts
@@ -176,3 +199,39 @@ rng:
     sta seed+0
     rts
 
+print_hex:
+    jsr byte_to_hex
+    ldy X16::Reg::ROMBank
+    phy
+    stz X16::Reg::ROMBank
+    phx
+    jsr X16::Kernal::CHROUT
+    pla
+    jsr X16::Kernal::CHROUT
+    pla
+    sta X16::Reg::ROMBank
+
+    rts
+
+byte_to_hex: ; converts a number to two ASCII/PETSCII hex digits: input A = number to convert, output A = most sig nybble, X = least sig nybble, affects A,X
+    pha
+
+    and #$0f
+    tax
+    pla
+    lsr
+    lsr
+    lsr
+    lsr
+    pha
+    txa
+    jsr xf_hexify
+    tax
+    pla
+xf_hexify:
+    cmp #10
+    bcc @nothex
+    adc #$66
+@nothex:
+    eor #%00110000
+    rts

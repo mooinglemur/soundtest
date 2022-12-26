@@ -15,6 +15,8 @@ midinote:
     .res 1
 kf:
     .res 1
+atten:
+    .res 1
 .segment "CODE"
 .include "x16.inc"
 
@@ -27,6 +29,10 @@ psg_init           := $C018
 notecon_midi2fm    := $C033
 notecon_freq2psg   := $C03C
 notecon_midi2psg   := $C03F
+psg_playfreq       := $C051
+psg_setvol         := $C054
+ym_set_atten       := $C057
+psg_set_atten      := $C05A
 
 main:
     ; fiddle with RNG a bit to avoid seed state being all zero
@@ -109,6 +115,10 @@ loop:
     clc
     jsr ym_playnote
     bcs error
+    
+    lda atten
+    ldx #0
+    jsr ym_set_atten
 
     ; wait for some interrupts
     ldx #4
@@ -119,22 +129,15 @@ l1:
 
     ; play psg
     
-    VERA_SET_ADDR Vera::VRAM_psg, 1
-
     lda midinote
     tax
     ldy kf
     jsr notecon_midi2psg
     bcs error
-    
-    stx Vera::Reg::Data0
-    sty Vera::Reg::Data0
-    lda #$ff ; full volume
-    sta Vera::Reg::Data0
-    lda #$3f ; square, 50% duty
-    sta Vera::Reg::Data0
 
-    VERA_SET_ADDR (Vera::VRAM_psg + 2), 0 ; volume register
+    lda #0
+    jsr psg_playfreq
+
     ; wait for some interrupts
     ldx #4
 l2:
@@ -148,8 +151,14 @@ l2:
     jsr ym_release
     bcs error
 
-    ; release psg
-    stz Vera::Reg::Data0 ; volume register from before
+    lda #0
+    ldx #0
+    jsr psg_setvol
+
+    lda atten
+    ldx #0
+
+    jsr psg_set_atten
 
     ; wait for some interrupts
     ldx #8
@@ -157,6 +166,11 @@ l3:
     wai
     dex
     bne l3
+
+    lda atten
+    inc
+    and #$7F
+    sta atten
 
     jmp loop
 error:

@@ -17,22 +17,29 @@ kf:
     .res 1
 atten:
     .res 1
+patch:
+    .res 1
+tmp:
+    .res 2
 .segment "CODE"
+testpat:
+    .byte "TEST.PAT"
+strstruct:
+    .byte 84
+    .word playstring
+playstring:
+    .byte "S0O3CDEFKGAB"
+    .byte "P2KC4.C8F4S1"
+    .byte ">RC4.C8F4GAG"
+    .byte "V63CV58CV40C"
+    .byte ">RC4.C8F4GAG"
+    .byte "S1C4.C8F4GAG"
+    .byte "S0C4.C8F4GAG"
+    
+
 .include "x16.inc"
 
-ym_write           := $C000
-ym_loadpatch       := $C006
-ym_playnote        := $C009
-ym_release         := $C012
-ym_init            := $C015
-psg_init           := $C018
-notecon_midi2fm    := $C033
-notecon_freq2psg   := $C03C
-notecon_midi2psg   := $C03F
-psg_playfreq       := $C051
-psg_setvol         := $C054
-ym_set_atten       := $C057
-psg_set_atten      := $C05A
+.include "../../x16-rom/inc/audio.inc"
 
 main:
     ; fiddle with RNG a bit to avoid seed state being all zero
@@ -54,7 +61,7 @@ main:
     pha
     lda #$0a
     sta X16::Reg::ROMBank
-
+stp
     ; test frequency conversion routines
     ldx #<440
     ldy #>440
@@ -63,7 +70,7 @@ main:
     bne freqerror
     cpy #>1181
     bne freqerror
-
+stp
     ldx #<24411
     ldy #>24411
     jsr notecon_freq2psg
@@ -81,44 +88,149 @@ freqerror:
 
     jmp end
 
+convtest:
+    ; convert some values back and forth
+    stz midinote
+    stz kf
+convloop:
+    lda midinote
+    jsr print_hex
+    jsr print_space
+    lda kf
+    jsr print_hex
+    jsr print_space
+
+    ldx midinote
+    ldy kf
+    jsr notecon_midi2psg
+
+    phy
+    phx
+    tya
+    jsr print_hex
+    pla
+    pha
+    jsr print_hex
+    jsr print_space
+
+    plx
+    ply
+    jsr notecon_psg2midi
+
+    phy
+    txa
+    jsr print_hex
+    jsr print_space
+    pla
+    jsr print_hex
+    jsr print_newline
+    
+    lda kf
+    clc
+    adc #128
+    sta kf
+    bne convloop
+    inc midinote
+    lda midinote
+    bpl convloop
+
 soundtest:
     jsr ym_init
     jsr psg_init
+    stz patch
     lda #0
-    ldx #4
+    ldx patch
     sec
     jsr ym_loadpatch
-    lda #$20
+    lda #$18
     sta midinote
+    lda #0
+    ldx #1
+    jsr ym_setpan
+    lda #1
+    ldx #2
+    jsr ym_setpan
+    lda #2
+    ldx #8
+    ldy #2
+    jsr X16::Kernal::SETLFS
+
+    lda #8
+    ldx #<testpat
+    ldy #>testpat
+    jsr X16::Kernal::SETNAM
+
+    jsr X16::Kernal::OPEN
+
+;    lda #2
+;    ldx #2
+;    jsr ym_loadpatchlfn
+
+    lda #2
+    jsr X16::Kernal::CLOSE
+
+    lda #0
+    jsr bas_playstringvoice
+
+    lda #84
+    ldx #<playstring
+    ldy #>playstring
+
+    jsr bas_psgplaystring
+
+    stp
+    lda #0
+    ldx #1
+    jsr ym_setpan
+    lda #1
+    ldx #2
+    jsr ym_setpan
+
 loop:
     ; get a (reasonbly-pitched) note at random
-    jsr rng
-    lda seed
-    and #$3f
-    clc
-    adc #$20
+;    jsr rng
+;    lda seed
+;    and #$3f
+;    clc
+;    adc #$20
+    lda midinote
+    inc
+    cmp #88
+    bcc :+
+    lda #24
+:
     sta midinote
     ; get a fractional note at random
     jsr rng
     lda seed
     and #$fc ; highest 6 bits
-;    lda #0
+    lda #0
     sta kf
+
+    lda midinote
+    jsr print_hex
+    jsr print_space
+
 
     tay
     ldx midinote
 
     ; play fm
-    jsr notecon_midi2fm
-    bcs error
-    lda #0
+;    jsr notecon_midi2fm
+;    bcs error
     clc
-    jsr ym_playnote
+    lda midinote
+    and #1
+    jsr ym_playdrum
     bcs error
     
-    lda atten
-    ldx #0
-    jsr ym_set_atten
+    ldx atten
+    lda #0
+    jsr ym_setatten
+
+    ldx atten
+    lda #1
+    jsr ym_setatten
 
     ; wait for some interrupts
     ldx #4
@@ -130,13 +242,31 @@ l1:
     ; play psg
     
     lda midinote
-    tax
+    and #3
+    bne :+
+    lda #3
+:   tax
+    lda #0
+    jsr psg_setpan
+
+    ldx midinote
     ldy kf
     jsr notecon_midi2psg
     bcs error
 
     lda #0
     jsr psg_playfreq
+
+    stz $9F25
+    lda #$01
+    sta $9F22
+    lda #$F9
+    sta $9F21
+
+    jsr rng
+    lda seed
+    ldx #0
+    jsr psg_write
 
     ; wait for some interrupts
     ldx #4
@@ -148,20 +278,20 @@ l2:
 
     ; release fm
     lda #0
-    jsr ym_release
-    bcs error
+;    jsr ym_release
+;    bcs error
 
     lda #0
     ldx #0
     jsr psg_setvol
 
-    lda atten
-    ldx #0
+    ldx atten
+    lda #0
 
-    jsr psg_set_atten
+    jsr psg_setatten
 
     ; wait for some interrupts
-    ldx #8
+    ldx #4
 l3:
     wai
     dex
@@ -169,9 +299,18 @@ l3:
 
     lda atten
     inc
-    and #$7F
+    and #$1F
     sta atten
 
+    lda atten
+    bne goloop
+    
+;    inc patch
+;    lda #0
+;    ldx patch
+;    sec
+;    jsr ym_loadpatch
+goloop:
     jmp loop
 error:
 end:
@@ -212,6 +351,15 @@ rng:
     sty seed+3 ; finish rotating byte 2 into 3
     sta seed+0
     rts
+
+print_space:
+    lda #' '
+    jmp X16::Kernal::CHROUT
+
+print_newline:
+    lda #$0D
+    jmp X16::Kernal::CHROUT
+
 
 print_hex:
     jsr byte_to_hex
